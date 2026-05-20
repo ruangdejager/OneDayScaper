@@ -1,20 +1,28 @@
+import logging
 import sqlite3
 from contextlib import contextmanager
+
+logger = logging.getLogger(__name__)
 
 
 @contextmanager
 def _get_conn(db_path: str):
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     try:
         yield conn
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
 
 def init_db(db_path: str) -> None:
-    with _get_conn(db_path) as conn:
+    # Use isolation_level=None (autocommit) so CREATE TABLE is committed immediately
+    conn = sqlite3.connect(db_path, isolation_level=None, check_same_thread=False)
+    try:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS subscriptions (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -25,6 +33,9 @@ def init_db(db_path: str) -> None:
                 UNIQUE(user_id, keyword)
             )
         """)
+        logger.info("Database ready at %s", db_path)
+    finally:
+        conn.close()
 
 
 def add_subscription(db_path: str, user_id: int, username: str, keyword: str) -> bool:
