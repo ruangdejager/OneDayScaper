@@ -42,8 +42,8 @@ def _main_keyboard() -> InlineKeyboardMarkup:
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
-        "Welcome to <b>OneDayOnly Deal Alerts</b>!\n\n"
-        "Subscribe to keywords and I'll notify you every morning when matching deals go live.",
+        "👋 Welcome to <b>OneDayOnly Deal Alerts</b>!\n\n"
+        "Subscribe to keywords and I'll notify you every morning at 4am when matching deals go live.",
         parse_mode=ParseMode.HTML,
         reply_markup=_main_keyboard(),
     )
