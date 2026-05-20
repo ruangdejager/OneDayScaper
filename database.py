@@ -1,4 +1,5 @@
 import logging
+import os
 import sqlite3
 from contextlib import contextmanager
 
@@ -42,12 +43,16 @@ def init_db(db_path: str) -> None:
 
 
 def add_subscription(db_path: str, user_id: int, username: str, keyword: str) -> bool:
+    abs_path = os.path.abspath(db_path)
+    logger.info("add_subscription: file=%s user_id=%s keyword=%s", abs_path, user_id, keyword)
     with _get_conn(db_path) as conn:
         cursor = conn.execute(
             "INSERT OR IGNORE INTO subscriptions (user_id, username, keyword) VALUES (?, ?, ?)",
             (user_id, username, keyword.lower()),
         )
-        return cursor.rowcount > 0
+        inserted = cursor.rowcount > 0
+        logger.info("add_subscription: inserted=%s", inserted)
+        return inserted
 
 
 def remove_subscription(db_path: str, user_id: int, keyword: str) -> bool:
@@ -60,12 +65,16 @@ def remove_subscription(db_path: str, user_id: int, keyword: str) -> bool:
 
 
 def get_user_keywords(db_path: str, user_id: int) -> list[str]:
+    abs_path = os.path.abspath(db_path)
+    logger.info("get_user_keywords: file=%s user_id=%s", abs_path, user_id)
     with _get_conn(db_path) as conn:
         rows = conn.execute(
             "SELECT keyword FROM subscriptions WHERE user_id = ? ORDER BY keyword",
             (user_id,),
         ).fetchall()
-        return [row["keyword"] for row in rows]
+        keywords = [row["keyword"] for row in rows]
+        logger.info("get_user_keywords: found=%s", keywords)
+        return keywords
 
 
 def get_all_subscriptions(db_path: str) -> dict[int, dict]:
