@@ -59,33 +59,43 @@ async def send_daily_notifications(context: CallbackContext) -> None:
         return
 
     notified = 0
-    for user_id, matched_products in matches.items():
+    for user_id in subscriptions:
+        matched_products = matches.get(user_id, [])
         try:
-            count = len(matched_products)
-            await context.bot.send_message(
-                chat_id=user_id,
-                text=f"Good morning! Found <b>{count} deal{'s' if count != 1 else ''}</b> matching your keywords today:",
-                parse_mode=ParseMode.HTML,
-            )
-            for product in matched_products:
-                await asyncio.sleep(0.1)
-                msg = format_product_message(product)
-                if product.image_url:
-                    try:
-                        await context.bot.send_photo(
-                            chat_id=user_id,
-                            photo=product.image_url,
-                            caption=msg,
-                            parse_mode=ParseMode.HTML,
-                        )
-                        continue
-                    except TelegramError:
-                        pass
+            if matched_products:
+                count = len(matched_products)
                 await context.bot.send_message(
                     chat_id=user_id,
-                    text=msg,
+                    text=f"🛍️ Good morning! Found <b>{count} deal{'s' if count != 1 else ''}</b> matching your keywords today:",
                     parse_mode=ParseMode.HTML,
-                    disable_web_page_preview=False,
+                )
+                for product in matched_products:
+                    await asyncio.sleep(0.1)
+                    msg = format_product_message(product)
+                    if product.image_url:
+                        try:
+                            await context.bot.send_photo(
+                                chat_id=user_id,
+                                photo=product.image_url,
+                                caption=msg,
+                                parse_mode=ParseMode.HTML,
+                            )
+                            continue
+                        except TelegramError:
+                            pass
+                    await context.bot.send_message(
+                        chat_id=user_id,
+                        text=msg,
+                        parse_mode=ParseMode.HTML,
+                        disable_web_page_preview=False,
+                    )
+            else:
+                keywords = subscriptions[user_id]["keywords"]
+                kw_list = ", ".join(f"<i>{k}</i>" for k in keywords)
+                await context.bot.send_message(
+                    chat_id=user_id,
+                    text=f"☀️ Good morning! OneDayOnly has been scraped — no matches today for {kw_list}.",
+                    parse_mode=ParseMode.HTML,
                 )
             notified += 1
         except Forbidden:
