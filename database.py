@@ -6,7 +6,8 @@ from contextlib import contextmanager
 logger = logging.getLogger(__name__)
 
 
-_CREATE_TABLE_SQL = """
+_CREATE_TABLES = [
+    """
     CREATE TABLE IF NOT EXISTS subscriptions (
         id          INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id     INTEGER NOT NULL,
@@ -15,15 +16,27 @@ _CREATE_TABLE_SQL = """
         created_at  TEXT DEFAULT (datetime('now')),
         UNIQUE(user_id, keyword)
     )
-"""
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS user_sites (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id     INTEGER NOT NULL,
+        url         TEXT NOT NULL,
+        name        TEXT,
+        created_at  TEXT DEFAULT (datetime('now')),
+        UNIQUE(user_id, url)
+    )
+    """,
+]
 
 
 @contextmanager
 def _get_conn(db_path: str):
     conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
-    # Always ensure table exists — idempotent and fast
-    conn.execute(_CREATE_TABLE_SQL)
+    # Always ensure all tables exist — idempotent and fast
+    for sql in _CREATE_TABLES:
+        conn.execute(sql)
     conn.commit()
     try:
         yield conn
@@ -89,4 +102,49 @@ def get_all_subscriptions(db_path: str) -> dict[int, dict]:
         if uid not in result:
             result[uid] = {"username": row["username"], "keywords": []}
         result[uid]["keywords"].append(row["keyword"])
+    return result
+
+
+# ── User Sites ────────────────────────────────────────────────────────────────
+
+def add_user_site(db_path: str, user_id: int, url: str, name: str) -> bool:
+    with _get_conn(db_path) as conn:
+        cursor = conn.execute(
+            "INSERT OR IGNORE INTO user_sites (user_id, url, name) VALUES (?, ?, ?)",
+            (user_id, url, name),
+        )
+        return cursor.rowcount > 0
+
+
+def remove_user_site(db_path: str, user_id: int, url: str) -> bool:
+    with _get_conn(db_path) as conn:
+        cursor = conn.execute(
+            "DELETE FROM user_sites WHERE user_id = ? AND url = ?",
+            (user_id, url),
+        )
+        return cursor.rowcount > 0
+
+
+def get_user_sites(db_path: str, user_id: int) -> list[dict]:
+    with _get_conn(db_path) as conn:
+        rows = conn.execute(
+            "SELECT url, name FROM user_sites WHERE user_id = ? ORDER BY name, url",
+            (user_id,),
+        ).fetchall()
+        return [{"url": row["url"], "name": row["name"] or row["url"]} for row in rows]
+
+
+def get_all_user_sites(db_path: str) -> dict[int, list[dict]]:
+    """Returns {user_id: [{"url": ..., "name": ...}, ...]}"""
+    with _get_conn(db_path) as conn:
+        rows = conn.execute(
+            "SELECT user_id, url, name FROM user_sites ORDER BY user_id"
+        ).fetchall()
+
+    result: dict[int, list[dict]] = {}
+    for row in rows:
+        uid = row["user_id"]
+        if uid not in result:
+            result[uid] = []
+        result[uid].append({"url": row["url"], "name": row["name"] or row["url"]})
     return result

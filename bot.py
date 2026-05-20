@@ -1,3 +1,4 @@
+import asyncio
 import datetime
 import logging
 from zoneinfo import ZoneInfo
@@ -13,30 +14,37 @@ from telegram.ext import (
 
 import config
 import database
+from generic_scraper import validate_url
 from notifier import send_daily_notifications
 
 logger = logging.getLogger(__name__)
 
 HELP_TEXT = (
     "<b>OneDayOnly Deal Alerts</b>\n\n"
-    "I scrape <a href='https://www.onedayonly.co.za'>OneDayOnly</a> every morning at 4am "
-    "and notify you when your keywords appear.\n\n"
-    "<b>Commands:</b>\n"
+    "I scrape websites every morning at 4am and notify you when your keywords appear.\n\n"
+    "<b>Keyword commands:</b>\n"
     "/subscribe &lt;keyword&gt; — Add a keyword alert\n"
     "/unsubscribe — Remove a keyword alert\n"
-    "/list — View your subscribed keywords\n"
-    "/start — Show this menu\n\n"
-    "<i>Keywords match anywhere in a product title or brand name.</i>"
+    "/list — View your subscribed keywords\n\n"
+    "<b>Website commands:</b>\n"
+    "/addsite &lt;url&gt; — Add a website to scrape\n"
+    "/mysites — View your added websites\n"
+    "/removesites — Remove a website\n\n"
+    "<i>Keywords match against all your added sites + OneDayOnly.</i>"
 )
 
 
 def _main_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("Subscribe", callback_data="prompt_subscribe"),
-            InlineKeyboardButton("My Keywords", callback_data="show_keywords"),
+            InlineKeyboardButton("🔔 My Keywords", callback_data="show_keywords"),
+            InlineKeyboardButton("🌐 My Sites", callback_data="show_sites"),
         ],
-        [InlineKeyboardButton("Help", callback_data="show_help")],
+        [
+            InlineKeyboardButton("➕ Subscribe", callback_data="prompt_subscribe"),
+            InlineKeyboardButton("➕ Add Site", callback_data="prompt_addsite"),
+        ],
+        [InlineKeyboardButton("❓ Help", callback_data="show_help")],
     ])
 
 
@@ -110,6 +118,69 @@ async def list_keywords(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     )
 
 
+async def addsite(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    url = " ".join(context.args).strip() if context.args else ""
+    if not url:
+        await update.message.reply_text(
+            "Please provide a URL.\nExample: <code>/addsite https://www.takealot.com</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+
+    await update.message.reply_text("⏳ Checking that URL, one moment...")
+
+    ok, error = await asyncio.get_event_loop().run_in_executor(None, validate_url, url)
+    if not ok:
+        await update.message.reply_text(f"❌ {error}")
+        return
+
+    from urllib.parse import urlparse
+    name = urlparse(url).netloc.replace("www.", "")
+    user = update.effective_user
+    inserted = database.add_user_site(config.DATABASE_PATH, user.id, url, name)
+    if inserted:
+        await update.message.reply_text(
+            f"✅ Added <b>{name}</b> to your scrape list.\n"
+            f"Your keywords will be matched against this site every morning.",
+            parse_mode=ParseMode.HTML,
+        )
+    else:
+        await update.message.reply_text(f"You've already added <b>{name}</b>.", parse_mode=ParseMode.HTML)
+
+
+async def mysites(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    sites = database.get_user_sites(config.DATABASE_PATH, user.id)
+    if not sites:
+        await update.message.reply_text(
+            "You have no custom sites yet.\nUse /addsite &lt;url&gt; to add one.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+    lines = "\n".join(f"• <a href='{s['url']}'>{s['name']}</a>" for s in sites)
+    await update.message.reply_text(
+        f"<b>Your sites</b> (+ OneDayOnly always included):\n{lines}",
+        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
+    )
+
+
+async def removesites(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    sites = database.get_user_sites(config.DATABASE_PATH, user.id)
+    if not sites:
+        await update.message.reply_text("You have no custom sites to remove.")
+        return
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"Remove: {s['name']}", callback_data=f"rmsite:{s['url']}")]
+        for s in sites
+    ])
+    await update.message.reply_text("Tap a site to remove it:", reply_markup=keyboard)
+
+
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -137,6 +208,23 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     elif data == "show_help":
         await query.edit_message_text(HELP_TEXT, parse_mode=ParseMode.HTML)
 
+    elif data == "prompt_addsite":
+        await query.edit_message_text(
+            "Send me a website URL to add:\n\n"
+            "<code>/addsite &lt;url&gt;</code>\n\n"
+            "Example: <code>/addsite https://www.takealot.com</code>",
+            parse_mode=ParseMode.HTML,
+        )
+
+    elif data == "show_sites":
+        sites = database.get_user_sites(config.DATABASE_PATH, user.id)
+        if sites:
+            lines = "\n".join(f"• <a href='{s['url']}'>{s['name']}</a>" for s in sites)
+            text = f"<b>Your sites</b> (+ OneDayOnly always included):\n{lines}"
+        else:
+            text = "You have no custom sites yet.\nUse /addsite &lt;url&gt; to add one."
+        await query.edit_message_text(text, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+
     elif data.startswith("unsub:"):
         keyword = data[len("unsub:"):]
         removed = database.remove_subscription(config.DATABASE_PATH, user.id, keyword)
@@ -150,6 +238,16 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 f"Could not find <b>{keyword}</b> in your subscriptions.",
                 parse_mode=ParseMode.HTML,
             )
+
+    elif data.startswith("rmsite:"):
+        url = data[len("rmsite:"):]
+        removed = database.remove_user_site(config.DATABASE_PATH, user.id, url)
+        from urllib.parse import urlparse
+        name = urlparse(url).netloc.replace("www.", "")
+        if removed:
+            await query.edit_message_text(f"Removed <b>{name}</b> from your sites.", parse_mode=ParseMode.HTML)
+        else:
+            await query.edit_message_text(f"Could not find <b>{name}</b> in your sites.", parse_mode=ParseMode.HTML)
 
 
 def main() -> None:
@@ -165,6 +263,9 @@ def main() -> None:
     application.add_handler(CommandHandler("subscribe", subscribe))
     application.add_handler(CommandHandler("unsubscribe", unsubscribe))
     application.add_handler(CommandHandler("list", list_keywords))
+    application.add_handler(CommandHandler("addsite", addsite))
+    application.add_handler(CommandHandler("mysites", mysites))
+    application.add_handler(CommandHandler("removesites", removesites))
     application.add_handler(CallbackQueryHandler(button_callback))
 
     job_time = datetime.time(
