@@ -5,10 +5,25 @@ from contextlib import contextmanager
 logger = logging.getLogger(__name__)
 
 
+_CREATE_TABLE_SQL = """
+    CREATE TABLE IF NOT EXISTS subscriptions (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id     INTEGER NOT NULL,
+        username    TEXT,
+        keyword     TEXT NOT NULL COLLATE NOCASE,
+        created_at  TEXT DEFAULT (datetime('now')),
+        UNIQUE(user_id, keyword)
+    )
+"""
+
+
 @contextmanager
 def _get_conn(db_path: str):
     conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    # Always ensure table exists — idempotent and fast
+    conn.execute(_CREATE_TABLE_SQL)
+    conn.commit()
     try:
         yield conn
         conn.commit()
@@ -20,22 +35,10 @@ def _get_conn(db_path: str):
 
 
 def init_db(db_path: str) -> None:
-    # Use isolation_level=None (autocommit) so CREATE TABLE is committed immediately
-    conn = sqlite3.connect(db_path, isolation_level=None, check_same_thread=False)
-    try:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS subscriptions (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id     INTEGER NOT NULL,
-                username    TEXT,
-                keyword     TEXT NOT NULL COLLATE NOCASE,
-                created_at  TEXT DEFAULT (datetime('now')),
-                UNIQUE(user_id, keyword)
-            )
-        """)
-        logger.info("Database ready at %s", db_path)
-    finally:
-        conn.close()
+    # Warm up the connection — table creation now handled in _get_conn
+    with _get_conn(db_path) as _:
+        pass
+    logger.info("Database ready at %s", db_path)
 
 
 def add_subscription(db_path: str, user_id: int, username: str, keyword: str) -> bool:
