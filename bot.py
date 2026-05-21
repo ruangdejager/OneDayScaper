@@ -1,6 +1,7 @@
 import asyncio
 import datetime
 import logging
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -65,56 +66,44 @@ async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             parse_mode=ParseMode.HTML,
         )
         return
-
     user = update.effective_user
-    inserted = database.add_subscription(
-        config.DATABASE_PATH, user.id, user.username or user.first_name, keyword
-    )
+    inserted = database.add_subscription(config.DATABASE_PATH, user.id, user.username or user.first_name, keyword)
     if inserted:
         await update.message.reply_text(
-            f"Subscribed to <b>{keyword}</b>. I'll alert you when it appears on OneDayOnly!",
+            f"✅ Subscribed to <b>{keyword}</b>. I'll alert you when it appears!",
             parse_mode=ParseMode.HTML,
         )
     else:
         await update.message.reply_text(
-            f"You're already subscribed to <b>{keyword}</b>.",
-            parse_mode=ParseMode.HTML,
+            f"You're already subscribed to <b>{keyword}</b>.", parse_mode=ParseMode.HTML
         )
 
 
 async def unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     keywords = database.get_user_keywords(config.DATABASE_PATH, user.id)
-
     if not keywords:
         await update.message.reply_text("You have no subscriptions to remove.")
         return
-
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton(f"Remove: {kw}", callback_data=f"unsub:{kw}")]
         for kw in keywords
     ])
-    await update.message.reply_text(
-        "Tap a keyword to remove it:",
-        reply_markup=keyboard,
-    )
+    await update.message.reply_text("Tap a keyword to remove it:", reply_markup=keyboard)
 
 
 async def list_keywords(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     keywords = database.get_user_keywords(config.DATABASE_PATH, user.id)
-
     if not keywords:
         await update.message.reply_text(
             "You have no active subscriptions.\nUse /subscribe &lt;keyword&gt; to add one.",
             parse_mode=ParseMode.HTML,
         )
         return
-
     bullet_list = "\n".join(f"• {kw}" for kw in keywords)
     await update.message.reply_text(
-        f"<b>Your subscribed keywords:</b>\n{bullet_list}",
-        parse_mode=ParseMode.HTML,
+        f"<b>Your subscribed keywords:</b>\n{bullet_list}", parse_mode=ParseMode.HTML
     )
 
 
@@ -126,7 +115,6 @@ async def addsite(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             parse_mode=ParseMode.HTML,
         )
         return
-
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
 
@@ -137,18 +125,19 @@ async def addsite(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(f"❌ {error}")
         return
 
-    from urllib.parse import urlparse
     name = urlparse(url).netloc.replace("www.", "")
     user = update.effective_user
     inserted = database.add_user_site(config.DATABASE_PATH, user.id, url, name)
     if inserted:
         await update.message.reply_text(
             f"✅ Added <b>{name}</b> to your scrape list.\n"
-            f"Your keywords will be matched against this site every morning.",
+            "Your keywords will be matched against this site every morning.",
             parse_mode=ParseMode.HTML,
         )
     else:
-        await update.message.reply_text(f"You've already added <b>{name}</b>.", parse_mode=ParseMode.HTML)
+        await update.message.reply_text(
+            f"You've already added <b>{name}</b>.", parse_mode=ParseMode.HTML
+        )
 
 
 async def mysites(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -184,38 +173,26 @@ async def removesites(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
-
     data = query.data
     user = update.effective_user
 
     if data == "prompt_subscribe":
         await query.edit_message_text(
-            "Send me a keyword to subscribe to:\n\n"
-            "<code>/subscribe &lt;keyword&gt;</code>\n\n"
-            "Example: <code>/subscribe lego</code>",
+            "Send me a keyword to subscribe to:\n\nExample: <code>/subscribe lego</code>",
             parse_mode=ParseMode.HTML,
         )
-
     elif data == "show_keywords":
         keywords = database.get_user_keywords(config.DATABASE_PATH, user.id)
         if keywords:
-            bullet_list = "\n".join(f"• {kw}" for kw in keywords)
-            text = f"<b>Your subscribed keywords:</b>\n{bullet_list}"
+            text = "<b>Your subscribed keywords:</b>\n" + "\n".join(f"• {kw}" for kw in keywords)
         else:
             text = "You have no active subscriptions yet.\nUse /subscribe &lt;keyword&gt; to add one."
         await query.edit_message_text(text, parse_mode=ParseMode.HTML)
-
-    elif data == "show_help":
-        await query.edit_message_text(HELP_TEXT, parse_mode=ParseMode.HTML)
-
     elif data == "prompt_addsite":
         await query.edit_message_text(
-            "Send me a website URL to add:\n\n"
-            "<code>/addsite &lt;url&gt;</code>\n\n"
-            "Example: <code>/addsite https://www.takealot.com</code>",
+            "Send me a website URL to add:\n\nExample: <code>/addsite https://www.takealot.com</code>",
             parse_mode=ParseMode.HTML,
         )
-
     elif data == "show_sites":
         sites = database.get_user_sites(config.DATABASE_PATH, user.id)
         if sites:
@@ -224,30 +201,31 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         else:
             text = "You have no custom sites yet.\nUse /addsite &lt;url&gt; to add one."
         await query.edit_message_text(text, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
-
+    elif data == "show_help":
+        await query.edit_message_text(HELP_TEXT, parse_mode=ParseMode.HTML)
     elif data.startswith("unsub:"):
         keyword = data[len("unsub:"):]
         removed = database.remove_subscription(config.DATABASE_PATH, user.id, keyword)
         if removed:
             await query.edit_message_text(
-                f"Removed <b>{keyword}</b> from your subscriptions.",
-                parse_mode=ParseMode.HTML,
+                f"Removed <b>{keyword}</b> from your subscriptions.", parse_mode=ParseMode.HTML
             )
         else:
             await query.edit_message_text(
-                f"Could not find <b>{keyword}</b> in your subscriptions.",
-                parse_mode=ParseMode.HTML,
+                f"Could not find <b>{keyword}</b>.", parse_mode=ParseMode.HTML
             )
-
     elif data.startswith("rmsite:"):
         url = data[len("rmsite:"):]
         removed = database.remove_user_site(config.DATABASE_PATH, user.id, url)
-        from urllib.parse import urlparse
         name = urlparse(url).netloc.replace("www.", "")
         if removed:
-            await query.edit_message_text(f"Removed <b>{name}</b> from your sites.", parse_mode=ParseMode.HTML)
+            await query.edit_message_text(
+                f"Removed <b>{name}</b> from your sites.", parse_mode=ParseMode.HTML
+            )
         else:
-            await query.edit_message_text(f"Could not find <b>{name}</b> in your sites.", parse_mode=ParseMode.HTML)
+            await query.edit_message_text(
+                f"Could not find <b>{name}</b>.", parse_mode=ParseMode.HTML
+            )
 
 
 def main() -> None:
@@ -256,7 +234,7 @@ def main() -> None:
     application = Application.builder().token(config.BOT_TOKEN).build()
 
     assert application.job_queue is not None, (
-        "JobQueue is not available. Install with: pip install 'python-telegram-bot[job-queue]'"
+        "JobQueue not available. Install with: pip install 'python-telegram-bot[job-queue]'"
     )
 
     application.add_handler(CommandHandler("start", start))
@@ -279,11 +257,7 @@ def main() -> None:
         name="daily_scrape",
     )
 
-    logger.info(
-        "Bot started. Daily scrape scheduled at %02d:%02d SAST.",
-        config.SCRAPE_HOUR,
-        config.SCRAPE_MINUTE,
-    )
+    logger.info("Bot started. Daily scrape scheduled at %02d:%02d SAST.", config.SCRAPE_HOUR, config.SCRAPE_MINUTE)
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 

@@ -1,10 +1,8 @@
 import logging
-import os
 import sqlite3
 from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
-
 
 _CREATE_TABLES = [
     """
@@ -12,7 +10,7 @@ _CREATE_TABLES = [
         id          INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id     INTEGER NOT NULL,
         username    TEXT,
-        keyword     TEXT NOT NULL COLLATE NOCASE,
+        keyword     TEXT NOT NULL,
         created_at  TEXT DEFAULT (datetime('now')),
         UNIQUE(user_id, keyword)
     )
@@ -34,7 +32,6 @@ _CREATE_TABLES = [
 def _get_conn(db_path: str):
     conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
-    # Always ensure all tables exist — idempotent and fast
     for sql in _CREATE_TABLES:
         conn.execute(sql)
     conn.commit()
@@ -49,23 +46,20 @@ def _get_conn(db_path: str):
 
 
 def init_db(db_path: str) -> None:
-    # Warm up the connection — table creation now handled in _get_conn
     with _get_conn(db_path) as _:
         pass
     logger.info("Database ready at %s", db_path)
 
 
+# ── Keywords ──────────────────────────────────────────────────────────────────
+
 def add_subscription(db_path: str, user_id: int, username: str, keyword: str) -> bool:
-    abs_path = os.path.abspath(db_path)
-    logger.info("add_subscription: file=%s user_id=%s keyword=%s", abs_path, user_id, keyword)
     with _get_conn(db_path) as conn:
         cursor = conn.execute(
             "INSERT OR IGNORE INTO subscriptions (user_id, username, keyword) VALUES (?, ?, ?)",
             (user_id, username, keyword.lower()),
         )
-        inserted = cursor.rowcount > 0
-        logger.info("add_subscription: inserted=%s", inserted)
-        return inserted
+        return cursor.rowcount > 0
 
 
 def remove_subscription(db_path: str, user_id: int, keyword: str) -> bool:
@@ -78,16 +72,12 @@ def remove_subscription(db_path: str, user_id: int, keyword: str) -> bool:
 
 
 def get_user_keywords(db_path: str, user_id: int) -> list[str]:
-    abs_path = os.path.abspath(db_path)
-    logger.info("get_user_keywords: file=%s user_id=%s", abs_path, user_id)
     with _get_conn(db_path) as conn:
         rows = conn.execute(
             "SELECT keyword FROM subscriptions WHERE user_id = ? ORDER BY keyword",
             (user_id,),
         ).fetchall()
-        keywords = [row["keyword"] for row in rows]
-        logger.info("get_user_keywords: found=%s", keywords)
-        return keywords
+        return [row["keyword"] for row in rows]
 
 
 def get_all_subscriptions(db_path: str) -> dict[int, dict]:
@@ -95,7 +85,6 @@ def get_all_subscriptions(db_path: str) -> dict[int, dict]:
         rows = conn.execute(
             "SELECT user_id, username, keyword FROM subscriptions ORDER BY user_id"
         ).fetchall()
-
     result: dict[int, dict] = {}
     for row in rows:
         uid = row["user_id"]
@@ -135,12 +124,10 @@ def get_user_sites(db_path: str, user_id: int) -> list[dict]:
 
 
 def get_all_user_sites(db_path: str) -> dict[int, list[dict]]:
-    """Returns {user_id: [{"url": ..., "name": ...}, ...]}"""
     with _get_conn(db_path) as conn:
         rows = conn.execute(
             "SELECT user_id, url, name FROM user_sites ORDER BY user_id"
         ).fetchall()
-
     result: dict[int, list[dict]] = {}
     for row in rows:
         uid = row["user_id"]
